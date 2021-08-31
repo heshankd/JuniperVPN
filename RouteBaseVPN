@@ -1,5 +1,5 @@
 Objective 
-
+---------
 Configure a route-based site-to-site VPN to connect private networks on vSRX-1 (LAN1 and LAN2) and vSRX-2 (LAN1). 
 We will manually configure the IKE and IPsec proposal parameters. 
 
@@ -67,6 +67,15 @@ We will manually configure the IKE and IPsec proposal parameters.
 ===============================
 Configuration & Troubleshooting ================================================================================================================================================
 ===============================
+
+IP Allocation
+=============
+VPC            - 192.168.10.2, 192.168.20.2, 10.30.0.2
+SRX ge-0/0/0   - 20.20.20.2, 30.30.30.2 (Internet Side)
+SRX ge-0/0/1,2 - 192.168.10.1, 192.168.20.1, 10.30.0.1 (LAN Side)
+Router fa0/0,1 - 20.20.20.1, 30.30.30.1
+
+
 
 ==============
 Configurations
@@ -502,7 +511,7 @@ root@Site2Firewall_root123>
 
 
 
-****If tunnel not establishing, try this****
+****If tunnel is not establishing, try this****
 in ike gateway configuration, configure proxy id
 
 SRX1
