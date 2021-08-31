@@ -1,0 +1,553 @@
+Objective 
+
+Configure a route-based site-to-site VPN to connect private networks on vSRX-1 (LAN1 and LAN2) and vSRX-2 (LAN1). 
+We will manually configure the IKE and IPsec proposal parameters. 
+
+# ISP Router Configuration
+	interface configuration
+
+# Firewall Pre Configuration
+	interface configuraion (private n public)
+	default route configuration
+	zone configuration (private to public)
+	security policy configuration from private zone to public zone and vice versa.
+
+# VPN Configuration
+1. Internet zone should allow isakmp traffic
+
+2. Configure secure tunnel (st) interface
+
+3. Add route to the remote side and make the (st) interface as the gateway
+
+4. Add the st interface to security zone, new zone for VPN
+
+5. Add Site1(local) LAN address to LAN zone and Site2(remote) LAN address to New VPN Zone
+
+6. Phase 1 Configuration / IKE propposal
+	authentication method (dsa-signatures, ecdsa-signatures-256, ecdsa-signatures-384, pre-shared-keys*, rsa-signatures)
+	authentication-alogorithm (md5, sha-256*, sha-384, sha1)
+	encryption algorithm (3des-cbc, aes-128-cbc, aes-128-gcm, aes-192-cbc, aes-192-gcm, aes-256-cbc*, aes-256-gcm, des-cbc)
+	DH group (group1,2*,5,14,19,20,24)
+	lifetime of the channel [in seconds - 86400*]
+
+7. IKE policy
+	mode (main*, aggressive) - IKE mode for phase1
+	pre-shared-key (ascii, hexadecimal)
+	proposal
+
+8. Define IKE gateway with,
+	remote side peer IP 
+	IKE policy
+	outgoing interface - Public Zone
+	IKE version (default ?) (v1-only, v2-only)
+
+9. Phase 2 Proposal
+	IPsec protocol (ah, esp*)
+	authentication algorithm (hmac-md5-96, hmac-sha-256-128*, hmac-sha1-96)
+	encryption algorithm (3des-cbc, aes-128-cbc, aes-128-gcm, aes-192-cbc, aes-192-gcm, aes-256-cbc*, aes-256-gcm, des-cbc)	
+	lifetime of the tunnel (in seconds)
+
+10. Create phase 2 policy / IPsec policy
+	phase 2 proposal
+	DH group for PFS (group1,2*,5,14,19,20,24)
+
+11. Define IPsec VPN
+	gateway
+	ipsec policy
+	tunnel establish method,
+  (immediately - tunnel created when configurations commited / on-traffic - tunnel created when there is traffic going through)
+	bind interface  	<<< in route-base vpn it binds secure tunnel interface in IPsec VPN configuration and uses routing process to direct traffic to the tunnel interface
+				<<< in policy base vpn it uses security policy to direct traffic to the tunnel interface
+
+12. Create security policy to allow and pass traffic from LAN zone to New VPN Zone
+
+
+
+
+===============================
+Configuration & Troubleshooting ================================================================================================================================================
+===============================
+
+==============
+Configurations
+==============
+
+Router
+======
+interface FastEthernet0/0
+ ip address 20.20.20.1 255.255.255.252
+ duplex auto
+ speed auto
+!
+interface FastEthernet0/1
+ ip address 30.30.30.1 255.255.255.252
+ duplex auto
+ speed auto
+
+
+SRX1
+====
+set system host-name Site1Firewall_root123
+set system root-authentication encrypted-password <PW>
+
+set security ike proposal IKEProposal authentication-method pre-shared-keys
+set security ike proposal IKEProposal dh-group group2
+set security ike proposal IKEProposal authentication-algorithm sha-256
+set security ike proposal IKEProposal encryption-algorithm aes-256-cbc
+set security ike proposal IKEProposal lifetime-seconds 86400
+
+set security ike policy IKEPOLICY1 mode main
+set security ike policy IKEPOLICY1 proposals IKEProposal
+set security ike policy IKEPOLICY1 pre-shared-key ascii-text <PRE_SHARED_KEY>
+
+set security ike gateway IKEGW1 ike-policy IKEPOLICY1
+set security ike gateway IKEGW1 address 30.30.30.2
+set security ike gateway IKEGW1 external-interface ge-0/0/0
+set security ike gateway IKEGW1 version v2-only
+
+set security ipsec proposal IPSECProposal description "VPN with ISPX"
+set security ipsec proposal IPSECProposal protocol esp
+set security ipsec proposal IPSECProposal authentication-algorithm hmac-sha-256-128
+set security ipsec proposal IPSECProposal encryption-algorithm aes-256-cbc
+set security ipsec proposal IPSECProposal lifetime-seconds 86400
+
+set security ipsec policy IPSECPolicy perfect-forward-secrecy keys group2
+set security ipsec policy IPSECPolicy proposals IPSECProposal
+
+set security ipsec vpn IPSECVPN1 bind-interface st0.0
+set security ipsec vpn IPSECVPN1 ike gateway IKEGW1
+set security ipsec vpn IPSECVPN1 ike ipsec-policy IPSECPolicy
+set security ipsec vpn IPSECVPN1 establish-tunnels immediately
+
+set security policies from-zone Towards_Internet to-zone Towards_LAN policy PermitAllFromNETtoLAN match source-address any
+set security policies from-zone Towards_Internet to-zone Towards_LAN policy PermitAllFromNETtoLAN match destination-address any
+set security policies from-zone Towards_Internet to-zone Towards_LAN policy PermitAllFromNETtoLAN match application any
+set security policies from-zone Towards_Internet to-zone Towards_LAN policy PermitAllFromNETtoLAN then permit
+
+set security policies from-zone Towards_LAN to-zone Towards_Internet policy PermitAllFromLantoNET match source-address any
+set security policies from-zone Towards_LAN to-zone Towards_Internet policy PermitAllFromLantoNET match destination-address any
+set security policies from-zone Towards_LAN to-zone Towards_Internet policy PermitAllFromLantoNET match application any
+set security policies from-zone Towards_LAN to-zone Towards_Internet policy PermitAllFromLantoNET then permit
+
+set security policies from-zone Towards_LAN to-zone Towards_VPN policy VPNSecurityPolicy1 match source-address any
+set security policies from-zone Towards_LAN to-zone Towards_VPN policy VPNSecurityPolicy1 match destination-address any
+set security policies from-zone Towards_LAN to-zone Towards_VPN policy VPNSecurityPolicy1 match application any
+set security policies from-zone Towards_LAN to-zone Towards_VPN policy VPNSecurityPolicy1 then permit
+
+set security policies from-zone Towards_VPN to-zone Towards_LAN policy VPNSecurityPolicy_FromInternet1 match source-address any
+set security policies from-zone Towards_VPN to-zone Towards_LAN policy VPNSecurityPolicy_FromInternet1 match destination-address any
+set security policies from-zone Towards_VPN to-zone Towards_LAN policy VPNSecurityPolicy_FromInternet1 match application any
+set security policies from-zone Towards_VPN to-zone Towards_LAN policy VPNSecurityPolicy_FromInternet1 then permit
+
+set security zones security-zone Towards_Internet description "Internet facing Zone"
+set security zones security-zone Towards_Internet screen untrust-screen
+set security zones security-zone Towards_Internet host-inbound-traffic system-services all
+set security zones security-zone Towards_Internet host-inbound-traffic system-services ike
+set security zones security-zone Towards_Internet interfaces ge-0/0/0.0
+
+set security zones security-zone Towards_LAN description "LAN facing Zone"
+set security zones security-zone Towards_LAN address-book address LAN1 192.168.10.0/24
+set security zones security-zone Towards_LAN address-book address LAN2 192.168.20.0/24
+set security zones security-zone Towards_LAN host-inbound-traffic system-services all
+set security zones security-zone Towards_LAN interfaces ge-0/0/1.0
+set security zones security-zone Towards_LAN interfaces ge-0/0/2.0
+
+set security zones security-zone Towards_VPN description "VPN Traffic Incoming"
+set security zones security-zone Towards_VPN address-book address LAN2 10.30.0.0/24
+set security zones security-zone Towards_VPN interfaces st0.0
+
+set interfaces ge-0/0/0 unit 0 family inet address 20.20.20.2/30
+set interfaces ge-0/0/1 unit 0 family inet address 192.168.10.1/24
+set interfaces ge-0/0/2 unit 0 family inet address 192.168.20.1/24
+set interfaces st0 unit 0 family inet address 10.0.0.1/30
+
+set routing-options static route 0.0.0.0/0 next-hop 20.20.20.1
+set routing-options static route 10.30.0.0/24 next-hop st0.0
+
+
+SRX2
+====
+
+set system host-name Site2Firewall_root123
+set system root-authentication encrypted-password <PW>
+
+set security ike proposal IKEProposal authentication-method pre-shared-keys
+set security ike proposal IKEProposal dh-group group2
+set security ike proposal IKEProposal authentication-algorithm sha-256
+set security ike proposal IKEProposal encryption-algorithm aes-256-cbc
+set security ike proposal IKEProposal lifetime-seconds 86400
+
+set security ike policy IKEPOLICY1 mode main
+set security ike policy IKEPOLICY1 proposals IKEProposal
+set security ike policy IKEPOLICY1 pre-shared-key ascii-text <PRE_SHARED_KEY>
+
+set security ike gateway IKEGW1 ike-policy IKEPOLICY1
+set security ike gateway IKEGW1 address 20.20.20.2
+set security ike gateway IKEGW1 external-interface ge-0/0/0
+set security ike gateway IKEGW1 version v2-only
+
+set security ipsec proposal IPSECProposal description "VPN with CusA"
+set security ipsec proposal IPSECProposal protocol esp
+set security ipsec proposal IPSECProposal authentication-algorithm hmac-sha-256-128
+set security ipsec proposal IPSECProposal encryption-algorithm aes-256-cbc
+set security ipsec proposal IPSECProposal lifetime-seconds 86400
+
+set security ipsec policy IPSECPolicy perfect-forward-secrecy keys group2
+set security ipsec policy IPSECPolicy proposals IPSECProposal
+
+set security ipsec vpn IPSECVPN1 bind-interface st0.0
+set security ipsec vpn IPSECVPN1 ike gateway IKEGW1
+set security ipsec vpn IPSECVPN1 ike ipsec-policy IPSECPolicy
+set security ipsec vpn IPSECVPN1 establish-tunnels immediately
+
+set security policies from-zone Towards_Internet to-zone Towards_LAN policy PermitAllFromNETtoLAN match source-address any
+set security policies from-zone Towards_Internet to-zone Towards_LAN policy PermitAllFromNETtoLAN match destination-address any
+set security policies from-zone Towards_Internet to-zone Towards_LAN policy PermitAllFromNETtoLAN match application any
+set security policies from-zone Towards_Internet to-zone Towards_LAN policy PermitAllFromNETtoLAN then permit
+
+set security policies from-zone Towards_VPN to-zone Towards_LAN policy VPNSecurityPolicy_FromInternet1 match source-address any
+set security policies from-zone Towards_VPN to-zone Towards_LAN policy VPNSecurityPolicy_FromInternet1 match destination-address any
+set security policies from-zone Towards_VPN to-zone Towards_LAN policy VPNSecurityPolicy_FromInternet1 match application any
+set security policies from-zone Towards_VPN to-zone Towards_LAN policy VPNSecurityPolicy_FromInternet1 then permit
+
+set security zones security-zone Towards_VPN description "VPN Traffic Incoming"
+set security zones security-zone Towards_VPN address-book address LAN1 192.168.10.0/24
+set security zones security-zone Towards_VPN address-book address LAN2 192.168.20.0/24
+set security zones security-zone Towards_VPN interfaces st0.0
+
+set security zones security-zone Towards_LAN description "LAN facing Zone"
+set security zones security-zone Towards_LAN address-book address LAN2 10.30.0.0/24
+set security zones security-zone Towards_LAN host-inbound-traffic system-services all
+set security zones security-zone Towards_LAN interfaces ge-0/0/1.0
+
+set security zones security-zone Towards_Internet description "Internet facing Zone"
+set security zones security-zone Towards_Internet screen untrust-screen
+set security zones security-zone Towards_Internet host-inbound-traffic system-services all
+set security zones security-zone Towards_Internet host-inbound-traffic system-services ike
+set security zones security-zone Towards_Internet interfaces ge-0/0/0.0
+
+set interfaces ge-0/0/0 unit 0 family inet address 30.30.30.2/30
+set interfaces ge-0/0/1 unit 0 family inet address 10.30.0.1/24
+set interfaces st0 unit 0 family inet address 10.0.0.2/30
+
+set routing-options static route 0.0.0.0/0 next-hop 30.30.30.1
+set routing-options static route 192.168.10.0/24 next-hop st0.0
+set routing-options static route 192.168.20.0/24 next-hop st0.0
+
+
+HOSTS
+=====
+CUS A LAN 1 - ip 192.168.10.2/24 192.168.10.1
+CUS A LAN 2 - ip 192.168.20.2/24 192.168.20.1
+CUS B LAN 1 - ip 10.30.0.2/24 10.30.0.1
+
+
+===============
+Troubleshooting
+===============
+
+SRX1
+====
+
+Phase 1 checks
+--------------
+root@Site1Firewall_root123> show security ike active-peer
+Remote Address                      Port     Peer IKE-ID                         AAA username                        Assigned IP
+30.30.30.2                          500      30.30.30.2                                 not available                0.0.0.0
+
+root@Site1Firewall_root123> show security ike security-associations
+Index   State  Initiator cookie  Responder cookie  Mode           Remote Address
+6821030 UP     4aa92f2afda01fbd  efd5148241b340a4  IKEv2          30.30.30.2
+6821031 UP     acd3f7b938b82ae0  c0cb23187968052e  IKEv2          30.30.30.2
+
+root@Site1Firewall_root123> show security ike security-associations detail
+IKE peer 30.30.30.2, Index 6821030, Gateway Name: IKEGW1
+  Role: Initiator, State: UP
+  Initiator cookie: 4aa92f2afda01fbd, Responder cookie: efd5148241b340a4
+  Exchange type: IKEv2, Authentication method: Pre-shared-keys
+  Local: 20.20.20.2:500, Remote: 30.30.30.2:500
+  Lifetime: Expires in 81609 seconds
+  Reauth Lifetime: Disabled
+  IKE Fragmentation: Enabled, Size: 576
+  Remote Access Client Info: Unknown Client
+  Peer ike-id: 30.30.30.2
+  AAA assigned IP: 0.0.0.0
+  Algorithms:
+   Authentication        : hmac-sha256-128
+   Encryption            : aes256-cbc
+   Pseudo random function: hmac-sha256
+   Diffie-Hellman group  : DH-group-2
+  Traffic statistics:
+   Input  bytes  :                  646
+   Output bytes  :                  662
+   Input  packets:                    2
+   Output packets:                    2
+   Input  fragmentated packets:       0
+   Output fragmentated packets:       0
+  IPSec security associations: 2 created, 0 deleted
+  Phase 2 negotiations in progress: 1
+
+    Negotiation type: Quick mode, Role: Initiator, Message ID: 0
+    Local: 20.20.20.2:500, Remote: 30.30.30.2:500
+    Local identity: 20.20.20.2
+    Remote identity: 30.30.30.2
+    Flags: IKE SA is created
+
+IKE peer 30.30.30.2, Index 6821031, Gateway Name: IKEGW1
+  Role: Responder, State: UP
+  Initiator cookie: acd3f7b938b82ae0, Responder cookie: c0cb23187968052e
+  Exchange type: IKEv2, Authentication method: Pre-shared-keys
+  Local: 20.20.20.2:500, Remote: 30.30.30.2:500
+  Lifetime: Expires in 81608 seconds
+  Reauth Lifetime: Disabled
+  IKE Fragmentation: Enabled, Size: 576
+  Remote Access Client Info: Unknown Client
+  Peer ike-id: 30.30.30.2
+  AAA assigned IP: 0.0.0.0
+  Algorithms:
+   Authentication        : hmac-sha256-128
+   Encryption            : aes256-cbc
+   Pseudo random function: hmac-sha256
+   Diffie-Hellman group  : DH-group-2
+  Traffic statistics:
+   Input  bytes  :                  662
+   Output bytes  :                  646
+   Input  packets:                    2
+   Output packets:                    2
+   Input  fragmentated packets:       0
+   Output fragmentated packets:       0
+  IPSec security associations: 2 created, 0 deleted
+  Phase 2 negotiations in progress: 1
+
+    Negotiation type: Quick mode, Role: Responder, Message ID: 0
+    Local: 20.20.20.2:500, Remote: 30.30.30.2:500
+    Local identity: 20.20.20.2
+    Remote identity: 30.30.30.2
+    Flags: IKE SA is created
+
+Phase 2 checks
+--------------
+
+root@Site1Firewall_root123> show security ipsec security-associations
+  Total active tunnels: 1     Total Ipsec sas: 2
+  ID    Algorithm       SPI      Life:sec/kb  Mon lsys Port  Gateway
+  <131073 ESP:aes-cbc-256/sha256 2358c310 81675/ unlim - root 500 30.30.30.2
+  >131073 ESP:aes-cbc-256/sha256 5602d9a1 81675/ unlim - root 500 30.30.30.2
+  <131073 ESP:aes-cbc-256/sha256 fe1d290e 81676/ unlim - root 500 30.30.30.2
+  >131073 ESP:aes-cbc-256/sha256 81324059 81676/ unlim - root 500 30.30.30.2
+
+root@Site1Firewall_root123> show security ipsec security-associations detail
+ID: 131073 Virtual-system: root, VPN Name: IPSECVPN1
+  Local Gateway: 20.20.20.2, Remote Gateway: 30.30.30.2
+  Local Identity: ipv4_subnet(any:0,[0..7]=0.0.0.0/0)
+  Remote Identity: ipv4_subnet(any:0,[0..7]=0.0.0.0/0)
+  Version: IKEv2
+  DF-bit: clear, Copy-Outer-DSCP Disabled, Bind-interface: st0.0
+  Port: 500, Nego#: 2, Fail#: 0, Def-Del#: 0 Flag: 0x600a29
+  Multi-sa, Configured SAs# 1, Negotiated SAs#: 2
+  Tunnel events:
+    Mon Aug 30 2021
+    : IPSec SA negotiation successfully completed          (2 times)
+    Mon Aug 30 2021
+    : IKE SA negotiation successfully completed            (2 times)
+    Mon Aug 30 2021
+    : No response from peer. Negotiation failed            (44 times)
+    Mon Aug 30 2021
+    : Tunnel is ready. Waiting for trigger event or peer to trigger negotiation (1 times)
+    Mon Aug 30 2021
+    : External interface's address received. Information updated (1 times)
+    Mon Aug 30 2021
+    : Bind-interface's zone received. Information updated  (1 times)
+    Mon Aug 30 2021
+    : External interface's zone received. Information updated (1 times)
+  Direction: inbound, SPI: 2358c310, AUX-SPI: 0
+                              , VPN Monitoring: -
+    Hard lifetime: Expires in 81668 seconds
+    Lifesize Remaining:  Unlimited
+    Soft lifetime: Expires in 81070 seconds
+    Mode: Tunnel(0 0), Type: dynamic, State: installed
+    Protocol: ESP, Authentication: hmac-sha256-128, Encryption: aes-cbc (256 bits)
+    Anti-replay service: counter-based enabled, Replay window size: 64
+  Direction: outbound, SPI: 5602d9a1, AUX-SPI: 0
+                              , VPN Monitoring: -
+    Hard lifetime: Expires in 81668 seconds
+    Lifesize Remaining:  Unlimited
+    Soft lifetime: Expires in 81070 seconds
+    Mode: Tunnel(0 0), Type: dynamic, State: installed
+    Protocol: ESP, Authentication: hmac-sha256-128, Encryption: aes-cbc (256 bits)
+    Anti-replay service: counter-based enabled, Replay window size: 64
+  Direction: inbound, SPI: fe1d290e, AUX-SPI: 0
+                              , VPN Monitoring: -
+    Hard lifetime: Expires in 81669 seconds
+    Lifesize Remaining:  Unlimited
+    Soft lifetime: Expires in 81061 seconds
+    Mode: Tunnel(0 0), Type: dynamic, State: installed
+    Protocol: ESP, Authentication: hmac-sha256-128, Encryption: aes-cbc (256 bits)
+    Anti-replay service: counter-based enabled, Replay window size: 64
+  Direction: outbound, SPI: 81324059, AUX-SPI: 0
+                              , VPN Monitoring: -
+    Hard lifetime: Expires in 81669 seconds
+    Lifesize Remaining:  Unlimited
+    Soft lifetime: Expires in 81061 seconds
+    Mode: Tunnel(0 0), Type: dynamic, State: installed
+    Protocol: ESP, Authentication: hmac-sha256-128, Encryption: aes-cbc (256 bits)
+    Anti-replay service: counter-based enabled, Replay window size: 64
+
+root@Site1Firewall_root123>
+
+
+
+SRX2
+====
+
+Phase 1 checks
+--------------
+
+root@Site2Firewall_root123> show security ike active-peer
+Remote Address                      Port     Peer IKE-ID                         AAA username                        Assigned IP
+20.20.20.2                          500      20.20.20.2                                 not available                0.0.0.0
+
+root@Site2Firewall_root123> show security ike security-associations
+Index   State  Initiator cookie  Responder cookie  Mode           Remote Address
+2300187 UP     4aa92f2afda01fbd  efd5148241b340a4  IKEv2          20.20.20.2
+
+root@Site2Firewall_root123> ...ity-associations detail
+IKE peer 20.20.20.2, Index 2300187, Gateway Name: IKEGW1
+  Role: Responder, State: UP
+  Initiator cookie: 4aa92f2afda01fbd, Responder cookie: efd5148241b340a4
+  Exchange type: IKEv2, Authentication method: Pre-shared-keys
+  Local: 30.30.30.2:500, Remote: 20.20.20.2:500
+  Lifetime: Expires in 80023 seconds
+  Reauth Lifetime: Disabled
+  IKE Fragmentation: Enabled, Size: 576
+  Remote Access Client Info: Unknown Client
+  Peer ike-id: 20.20.20.2
+  AAA assigned IP: 0.0.0.0
+  Algorithms:
+   Authentication        : hmac-sha256-128
+   Encryption            : aes256-cbc
+   Pseudo random function: hmac-sha256
+   Diffie-Hellman group  : DH-group-2
+  Traffic statistics:
+   Input  bytes  :                  662
+   Output bytes  :                  646
+   Input  packets:                    2
+   Output packets:                    2
+   Input  fragmentated packets:       0
+   Output fragmentated packets:       0
+  IPSec security associations: 2 created, 0 deleted
+  Phase 2 negotiations in progress: 1
+
+    Negotiation type: Quick mode, Role: Responder, Message ID: 0
+    Local: 30.30.30.2:500, Remote: 20.20.20.2:500
+    Local identity: 30.30.30.2
+    Remote identity: 20.20.20.2
+    Flags: IKE SA is created
+
+Phase 2 checks
+--------------
+
+root@Site2Firewall_root123> show security ipsec security-associations
+  Total active tunnels: 1     Total Ipsec sas: 1
+  ID    Algorithm       SPI      Life:sec/kb  Mon lsys Port  Gateway
+  <131073 ESP:aes-cbc-256/sha256 81324059 79941/ unlim - root 500 20.20.20.2
+  >131073 ESP:aes-cbc-256/sha256 fe1d290e 79941/ unlim - root 500 20.20.20.2
+
+root@Site2Firewall_root123> ...urity-associations detail
+ID: 131073 Virtual-system: root, VPN Name: IPSECVPN1
+  Local Gateway: 30.30.30.2, Remote Gateway: 20.20.20.2
+  Local Identity: ipv4_subnet(any:0,[0..7]=0.0.0.0/0)
+  Remote Identity: ipv4_subnet(any:0,[0..7]=0.0.0.0/0)
+  Version: IKEv2
+  DF-bit: clear, Copy-Outer-DSCP Disabled, Bind-interface: st0.0
+  Port: 500, Nego#: 2, Fail#: 0, Def-Del#: 0 Flag: 0x600a29
+  Multi-sa, Configured SAs# 1, Negotiated SAs#: 1
+  Tunnel events:
+    Mon Aug 30 2021
+    : IPSec SA negotiation successfully completed          (1 times)
+    Mon Aug 30 2021
+    : Initial-Contact received from peer. Stale IKE/IPSec SAs cleared (1 times)
+    Mon Aug 30 2021
+    : IPSec SA negotiation successfully completed          (1 times)
+    Mon Aug 30 2021
+    : IKE SA negotiation successfully completed            (1 times)
+    Mon Aug 30 2021
+    : Tunnel is ready. Waiting for trigger event or peer to trigger negotiation (1 times)
+    Mon Aug 30 2021
+    : External interface's address received. Information updated (1 times)
+    Mon Aug 30 2021
+    : Bind-interface's zone received. Information updated  (1 times)
+    Mon Aug 30 2021
+    : External interface's zone received. Information updated (1 times)
+  Direction: inbound, SPI: 81324059, AUX-SPI: 0
+                              , VPN Monitoring: -
+    Hard lifetime: Expires in 79938 seconds
+    Lifesize Remaining:  Unlimited
+    Soft lifetime: Expires in 79375 seconds
+    Mode: Tunnel(0 0), Type: dynamic, State: installed
+    Protocol: ESP, Authentication: hmac-sha256-128, Encryption: aes-cbc (256 bits)
+    Anti-replay service: counter-based enabled, Replay window size: 64
+  Direction: outbound, SPI: fe1d290e, AUX-SPI: 0
+                              , VPN Monitoring: -
+    Hard lifetime: Expires in 79938 seconds
+    Lifesize Remaining:  Unlimited
+    Soft lifetime: Expires in 79375 seconds
+    Mode: Tunnel(0 0), Type: dynamic, State: installed
+    Protocol: ESP, Authentication: hmac-sha256-128, Encryption: aes-cbc (256 bits)
+    Anti-replay service: counter-based enabled, Replay window size: 64
+
+root@Site2Firewall_root123>
+
+
+
+
+
+****If tunnel not establishing, try this****
+in ike gateway configuration, configure proxy id
+
+SRX1
+====
+set security ipsec vpn IPSECVPN1 ike proxy-identity local 20.20.20.2/30
+set security ipsec vpn IPSECVPN1 ike proxy-identity remote 30.30.30.2/30
+
+When only one side configured, i recieved this error message
+
+root@Site1Firewall_root123# run show security ipsec inactive-tunnels
+  Total inactive tunnels: 1
+  Total inactive tunnels with establish immediately: 1
+  ID           Port   Gateway          Pending SAs   Tunnel Down Reason
+  131073       500    30.30.30.2       1
+   Peer proposed traffic-selectors are not in configured range                 (1 times)
+
+SRX2
+====
+set security ipsec vpn IPSECVPN1 ike proxy-identity local 30.30.30.2/30
+set security ipsec vpn IPSECVPN1 ike proxy-identity remote 20.20.20.2/30
+
+Proxy ID for
+	Unstable tunnels
+	traffic failing to pass on peer device due to traffic arriving on wrong VPN tunnel
+	inability to establish a VPN tunnel due to "failed to match peer proxy-ids" problem
+
+
+Acording to Juniper, if proxy ID works fine, below output should come for #show security ipsec security-association details
+root@Site2Firewall_root123> ...urity-associations detail
+ID: 131073 Virtual-system: root, VPN Name: IPSECVPN1
+  Local Gateway: 30.30.30.2, Remote Gateway: 20.20.20.2
+  Local Identity: <Local IP Range> <<<<<<<
+  Remote Identity: <Peer IP Range> <<<<<<<
+
+
+
+
+
+Shortning
+=========
+IKE
+	Proposal
+	Policy
+	Gateway
+IPSEC
+	Proposal
+	Policy
+	VPN
